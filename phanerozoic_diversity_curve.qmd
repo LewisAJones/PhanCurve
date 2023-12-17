@@ -1,0 +1,224 @@
+---
+title: "Phanerozoic Diversity Curve"
+subtitle: "Range-through genus richness based on five major marine invertebrate groups"
+author: "Lewis A. Jones"
+date: today
+toc: true
+format:
+  html:
+    html-math-method: katex
+    code-tools: true
+    self-contained: true
+execute:
+  warning: false
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(out.width = "100%")
+```
+
+In this report, I document the process for generating a simple Phanerozoic diversity curve based on range-through diversity. Here, we will focus on raw genus counts for five major marine invertebrate groups: Bivalvia, Brachiopoda, Cephalopoda, Gastropoda, and Trilobita.
+
+# Project setup
+
+Load required libraries:
+```{r libraries}
+# Data download
+library(RCurl)
+# Data preparation
+library(palaeoverse) 
+library(tidyverse)
+library(stringr)
+# Pretty plotting
+library(ggplot2)
+library(deeptime)
+```
+
+Set parameters:
+```{r parameters}
+#| output: false
+# Prevent timeout for large API request
+RCurl::curlSetOpt(timeout = 3000) 
+# Paleobiology Database API download parameters
+groups = c("Bivalvia,Brachiopoda,Cephalopoda,Gastropoda,Trilobita")
+taxonomic_resolution = c("genus")
+preservation = c("regular")
+modifiers = c("genus_certain")
+taxon_status = c("valid")
+identification = c("latest")
+environment = c("marine")
+study_period = c("Fortunian,Holocene")
+show = c("genus,pres,strat,coll,coords,paleoloc,loc,class")
+# Bin size for counts in millions of years
+bin_size = 10
+```
+
+Download occurrence data from [The Paleobiology Database](https://paleobiodb.org/#/). Skip this step if the file already exists: 
+
+```{r download}
+# Skip if file already exists
+if (any(list.files("./data") != "raw_pbdb_data_.RDS")) {
+  # Setup API link
+  API <- paste0("https://paleobiodb.org/data1.2/occs/list.csv?",
+                "base_name=", groups,
+                "&taxon_reso=", taxonomic_resolution, 
+                "&ident=",identification,
+                "&taxon_status=", taxon_status,
+                "&idqual=", modifiers,
+                "&pres=", preservation,
+                "&interval=", study_period,
+                "&envtype=", environment,
+                "&show=", show)
+  # Get data
+  occdf <- RCurl::getURL(url = API, ssl.verifypeer = FALSE)
+  # Read data
+  occdf <- read.csv(textConnection(occdf))
+  # Save raw data
+  saveRDS(occdf, "./data/raw_pbdb_data_.RDS")
+} else {
+  occdf <- readRDS("./data/raw_pbdb_data_.RDS")
+}
+```
+
+# Data cleaning
+
+Filter unconstrained taxa for now (to be fixed with taxonomy classified):
+
+```{r unconstrained}
+occdf <- occdf[which(occdf$class != "NO_CLASS_SPECIFIED"), ] # 470 occ
+occdf <- occdf[which(occdf$family != "NO_FAMILY_SPECIFIED"), ] # 6520 occ
+occdf <- occdf[which(occdf$genus != "NO_GENUS_SPECIFIED"), ] # 29 occ
+```
+
+Use genus-level accepted names:
+
+```{r genus-id}
+# Split accepted name string
+accepted_name <- str_split_fixed(string = occdf$accepted_name, pattern = " ", n = 2)
+# Extract genus names (first column) and assign to occdf
+occdf$genus <- accepted_name[, 1]
+# Set rank to genus
+occdf$rank <- "genus"
+# Create unique taxon names (to avoid genera with the same name but belonging to different families)
+occdf$family_genus <- paste0(occdf$family, "_", occdf$genus)
+```
+
+Assign group based on class:
+
+```{r assign-group}
+# Collapse Brachiopoda classes
+brachs <- c("Chileata", "Craniata", "Kutorginata", "Lingulata",
+            "Obolellata", "Paterinata", "Rhynchonellata", "Strophomenata")
+# Assign groups (Bivalvia, Brachiopoda, Cephalopoda, Gastropoda, and Trilobita)
+occdf$group <- occdf$class
+# Replace Brachiopoda classes with Brachiopoda
+occdf$group[which(occdf$group %in% brachs)] <- c("Brachiopoda")
+```
+
+# Data analyses
+
+First, create an empty `data.frame` to populate based on the specified parameters:
+
+```{r dataframe}
+# Generate dataframe for storing counts
+bins <- data.frame(bin = seq(from = 1, to = (541 / bin_size)),
+                   max_ma = seq(from = 541, to = (0 + bin_size), by = -bin_size),
+                   mid_ma = seq(from = (541 - (bin_size / 2)), to = (0 + (bin_size / 2)), by = -bin_size),
+                   min_ma = seq(from = (541 - bin_size), to = 0, by = -bin_size),
+                   total_counts = NA,
+                   bivalvia_counts = NA,
+                   brachiopoda_counts = NA,
+                   cephalopoda_counts = NA,
+                   gastropoda_counts = NA,
+                   trilobita_counts = NA)
+```
+
+Compute taxonomic ranges through time:
+
+```{r range-through}
+# Compute ranges for bivalvia
+bivalvia <- tax_range_time(
+  occdf = occdf[which(occdf$group == "Bivalvia"), ],
+  name = "family_genus",
+  min_ma = "min_ma", max_ma = "max_ma",
+  plot = TRUE)
+# Compute ranges for brachiopoda
+brachiopoda <- tax_range_time(
+  occdf = occdf[which(occdf$group == "Brachiopoda"), ],
+  name = "family_genus",
+  min_ma = "min_ma", max_ma = "max_ma",
+  plot = TRUE)
+# Compute ranges for cephalopoda
+cephalopoda <- tax_range_time(
+  occdf = occdf[which(occdf$group == "Cephalopoda"), ],
+  name = "family_genus",
+  min_ma = "min_ma", max_ma = "max_ma",
+  plot = TRUE)
+# Compute ranges for gastropoda
+gastropoda <- tax_range_time(
+  occdf = occdf[which(occdf$group == "Gastropoda"), ],
+  name = "family_genus",
+  min_ma = "min_ma", max_ma = "max_ma",
+  plot = TRUE)
+# Compute ranges for trilobita
+trilobita <- tax_range_time(
+  occdf = occdf[which(occdf$group == "Trilobita"), ],
+  name = "family_genus",
+  min_ma = "min_ma", max_ma = "max_ma",
+  plot = TRUE)
+```
+
+Count the number of taxa per temporal bin:
+
+```{r counts}
+# Count taxa
+for (i in 1:nrow(bins)) {
+  # Bivalvia
+  bins$bivalvia_counts[i] <- length(
+    which(bivalvia$min_ma <= bins$max_ma[i] & bivalvia$max_ma >= bins$min_ma[i]))  
+  # Brachiopoda
+  bins$brachiopoda_counts[i] <- length(
+    which(brachiopoda$min_ma <= bins$max_ma[i] & brachiopoda$max_ma >= bins$min_ma[i]))  
+  # Cephalopoda
+  bins$cephalopoda_counts[i] <- length(
+    which(cephalopoda$min_ma <= bins$max_ma[i] & cephalopoda$max_ma >= bins$min_ma[i]))  
+  # Gastropoda
+  bins$gastropoda_counts[i] <- length(
+    which(gastropoda$min_ma <= bins$max_ma[i] & gastropoda$max_ma >= bins$min_ma[i]))  
+  # Trilobita
+  bins$trilobita_counts[i] <- length(
+    which(trilobita$min_ma <= bins$max_ma[i] & trilobita$max_ma >= bins$min_ma[i]))
+}
+# Gather data into a long-format dataframe
+bins %>% 
+  gather(key = "group", value = "counts", 6:10) -> counts
+```
+
+# Data visualisation
+
+Now, let's plot our Phanerozoic range-through diversity curve:
+
+```{r curve}
+ggplot(data = counts, aes(x = mid_ma, y = counts)) +
+  geom_area(aes(fill = group)) +
+  geom_vline(aes(xintercept = 66), alpha = 1) + # Cretaceous
+  geom_vline(aes(xintercept = 201.400), alpha = 1) + # end-Triassic
+  geom_vline(aes(xintercept = 251.902), alpha = 1) + # end-Permian
+  geom_vline(aes(xintercept = 358.900), alpha = 1) + # Late Devonian
+  geom_vline(aes(xintercept = 443.800), alpha = 1) + # end-Ordovician
+  scale_x_reverse() + # Reverse x-axis
+  scale_fill_viridis_d(labels = c("bivalvia_counts" = "Bivalvia", # Modifi legend labels
+                                 "brachiopoda_counts" = "Brachiopoda", 
+                                 "cephalopoda_counts" = "Cephalopoda", 
+                                 "gastropoda_counts" = "Gastropoda", 
+                                 "trilobita_counts" = "Trilobita")) +
+  labs(title = "Phanerozoic diversity curve",
+       x = "Time (Ma)", y = "Range-through genus richness") +
+  theme_bw() + # Theme
+  theme(
+    legend.position = "bottom", # Position of legend
+    legend.title = element_blank() # Remove legend title
+  ) +
+  coord_geo(height = unit(1, "line")) # Add geological timescale
+```
+
